@@ -2,8 +2,8 @@
   (:require
     [clojure.java.io :as io]
     [clojure.edn :as edn]
-    [nrepl.server]
-    [clojure.string :as str])
+    [leadbot.text :as text]
+    [nrepl.server])
   (:import
     (java.util.concurrent Executors ExecutorService)
     (com.sedmelluq.discord.lavaplayer.player DefaultAudioPlayerManager AudioLoadResultHandler)
@@ -19,83 +19,7 @@
     (com.sedmelluq.discord.lavaplayer.track.playback AudioFrame)))
 
 
-(defmulti handle-event (fn [req] (class (:event req))))
 
-(defmethod handle-event :default [{:keys [event]}]
-  (println "Unhandled event class:"  (class event)))
-
-
-
-(defmethod handle-event GuildMessageReceivedEvent
-  [{:keys [^GuildMessageReceivedEvent event]
-    {:keys [^DefaultAudioPlayerManager playermanager]} :ctx
-    :as req}]
-  (println "Got message")
-  (let [message (.getMessage event)
-        author (.getAuthor event)
-        member (.getMember event)
-        textchannel (.getTextChannel message)
-        voicechannel (.getChannel (.getVoiceState member))]
-
-    (cond
-      (.isBot author)
-      (do
-        (println "Bot")
-        nil)
-
-      (not voicechannel)
-      (do
-        (println "No voice")
-        (doto (.sendMessage textchannel "You're not in a voice channel?")
-          (.queue)))
-
-      (str/starts-with? (.getContentStripped message) "!play")
-      (let [botvoicestate (.getVoiceState (.getSelfMember (.getGuild event)))]
-        (println "Play")
-
-        (when-not (.inVoiceChannel botvoicestate)
-          (.openAudioConnection (.getAudioManager (.getGuild event)) voicechannel))
-
-        (doto (.sendMessage textchannel "Playing a random song. eventually.")
-          (.queue))
-
-        (let [audioplayer (.createPlayer playermanager)
-              lastframe (atom nil)]
-          (.loadItem playermanager "https://www.youtube.com/watch?v=q0hyYWKXF0Q"
-            (proxy [AudioLoadResultHandler] []
-              (trackLoaded [track]
-                (.setSendingHandler (.getAudioManager (.getGuild member))
-                  (proxy [AudioSendHandler] []
-                    (canProvide []
-                      (swap! lastframe (fn [f] (if f f (.provide audioplayer))))
-                      (not (nil? @lastframe)))
-
-                    (provide20MsAudio []
-                      (swap! lastframe (fn [f] (if f f (.provide audioplayer))))
-                      (let [^AudioFrame frame @lastframe]
-                        (reset! lastframe nil)
-                        (ByteBuffer/wrap
-                          (.getData frame))))
-
-                    (isOpus [] true)))
-                (.playTrack audioplayer track)
-
-                (doto (.sendMessage textchannel "Track loaded")
-                  (.queue)))
-              (playlistLoaded [playlist]
-                (doto (.sendMessage textchannel "Playlist loaded")
-                  (.queue)))
-              (noMatches []
-                (doto (.sendMessage textchannel "No matches")
-                  (.queue)))
-              (loadFailed [ex]
-                (doto (.sendMessage textchannel "Load failed")
-                  (.queue)))))
-          )
-
-        )
-
-      :else (println "Nothing"))))
 
 
 
@@ -107,7 +31,7 @@
 
 
 (defn bot-event [event]
-  (handle-event {:event event :app-atom app-atom :ctx @context-state}))
+  (text/handle-event {:event event :app-atom app-atom :ctx @context-state}))
 
 (defn shutdown-guild [jda guild]
   (let [audio-manager (.getAudioManager guild)]
@@ -191,4 +115,5 @@
         :jda jda
         :threadpool (Executors/newScheduledThreadPool 4)
         :playermanager playermanager)
+
       (println "Setup and ready."))))
