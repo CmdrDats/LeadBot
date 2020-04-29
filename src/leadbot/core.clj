@@ -9,14 +9,9 @@
     (com.sedmelluq.discord.lavaplayer.player DefaultAudioPlayerManager AudioLoadResultHandler)
     (com.sedmelluq.discord.lavaplayer.source AudioSourceManagers)
     (com.sedmelluq.discord.lavaplayer.source.youtube YoutubeAudioSourceManager)
-    (com.sedmelluq.discord.lavaplayer.jdaudp NativeAudioSendFactory)
-    (net.dv8tion.jda.api.events.message.guild GuildMessageReceivedEvent)
-    (net.dv8tion.jda.api.audio AudioSendHandler)
     (net.dv8tion.jda.api JDA JDA$Status OnlineStatus JDABuilder Permission)
     (net.dv8tion.jda.api.entities Guild Activity)
-    (net.dv8tion.jda.api.hooks EventListener)
-    (java.nio ByteBuffer)
-    (com.sedmelluq.discord.lavaplayer.track.playback AudioFrame)))
+    (net.dv8tion.jda.api.hooks EventListener)))
 
 
 
@@ -71,7 +66,7 @@
     (let [jdabuilder
           (doto (JDABuilder.)
             (.setToken (:token config))
-            (.setAudioSendFactory (NativeAudioSendFactory.))
+            ;(.setAudioSendFactory (NativeAudioSendFactory.))
 
             #_(.setAudioEnabled true)
             (.setActivity (Activity/playing "Loading.."))

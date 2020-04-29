@@ -1,85 +1,33 @@
 (ns leadbot.text
-  (:require [clojure.string :as str])
+  (:require
+    [clojure.string :as str]
+    [leadbot.audio :as audio]
+    [leadbot.text-utils :as tu]
+    [leadbot.xkcd :as xkcd])
   (:import
     (com.sedmelluq.discord.lavaplayer.player DefaultAudioPlayerManager AudioLoadResultHandler)
     (net.dv8tion.jda.api.events.message.guild GuildMessageReceivedEvent)
-    (net.dv8tion.jda.api.audio AudioSendHandler)
-    (java.nio ByteBuffer)
-    (com.sedmelluq.discord.lavaplayer.track.playback AudioFrame)))
+    (net.dv8tion.jda.api.events.message.guild.react GuildMessageReactionAddEvent)))
 
 
-(defn play-youtube
-  [{:keys [playermanager] :as ctx}
-   event
-   {:keys [last-match] :as menu}]
-
-  (let [message (.getMessage event)
-        author (.getAuthor event)
-        member (.getMember event)
-        textchannel (.getTextChannel message)
-        voicechannel (.getChannel (.getVoiceState member))
-
-
-        botvoicestate (.getVoiceState (.getSelfMember (.getGuild event)))
-
-        url last-match]
-
-    (println "Playing " url)
-
-    (when-not (.inVoiceChannel botvoicestate)
-      (.openAudioConnection (.getAudioManager (.getGuild event)) voicechannel))
-
-    (doto (.sendMessage textchannel "Playing a random song. eventually.")
-      (.queue))
-
-    (let [audioplayer (.createPlayer playermanager)
-          lastframe (atom nil)]
-
-      (.loadItem
-        playermanager url
-        (proxy [AudioLoadResultHandler] []
-          (trackLoaded [track]
-            (.setSendingHandler
-              (.getAudioManager (.getGuild member))
-              (proxy [AudioSendHandler] []
-                (canProvide []
-                  (swap! lastframe (fn [f] (if f f (.provide audioplayer))))
-                  (not (nil? @lastframe)))
-
-                (provide20MsAudio []
-                  (swap! lastframe (fn [f] (if f f (.provide audioplayer))))
-                  (let [^AudioFrame frame @lastframe]
-                    (reset! lastframe nil)
-                    (ByteBuffer/wrap
-                      (.getData frame))))
-
-                (isOpus [] true)))
-
-            (.playTrack audioplayer track)
-            (doto (.sendMessage textchannel "Track loaded")
-              (.queue)))
-
-          (playlistLoaded [playlist]
-            (doto (.sendMessage textchannel "Playlist loaded")
-              (.queue)))
-
-          (noMatches []
-            (doto (.sendMessage textchannel "No matches")
-              (.queue)))
-
-          (loadFailed [ex]
-            (doto (.sendMessage textchannel "Load failed")
-              (.queue))))))))
 
 (def command-menu
   [{:match #"!play"
     :submenu
     [{:match #".*"
-      :action play-youtube}]}])
+      :action audio/play-url}]}
+
+   {:match #"!xkcd"
+    :submenu
+    [{:match #"random"
+      :action xkcd/random-xkcd}
+     {:match #".*"
+      :action xkcd/specific-xkcd}]}])
 
 
-(defn menu-match
-   [ctx selected-menu event message]
+(defn menu-match [ctx selected-menu event message]
+  (println "Running matcher against: " message)
+
   (let [message-parts (str/split message #" ")
         {action-fn :action :as selected-menu}
         (loop [message message-parts
@@ -112,22 +60,19 @@
 
 
 
-
-
 (defmulti handle-event (fn [req] (class (:event req))))
 
 
 (defmethod handle-event :default [{:keys [event]}]
   (println "Unhandled event class:" (class event)))
 
-
+;; On Message Received
 (defmethod handle-event GuildMessageReceivedEvent
   [{:keys                                                      [^GuildMessageReceivedEvent event]
     {:keys [^DefaultAudioPlayerManager playermanager] :as ctx} :ctx
     :as                                                        req}]
   (println "Received Message")
   (let [message (.getMessage event)
-        _ (println (.getContentStripped message))
         author (.getAuthor event)
         member (.getMember event)
         textchannel (.getTextChannel message)
@@ -139,18 +84,20 @@
 
     (cond
       (.isBot author)
-      (do
-        (println "Bot")
-        nil)
+      nil
 
       (not voicechannel)
-      (do
-        (println "No voice")
-        (doto (.sendMessage textchannel "You're not in a voice channel?")
-          (.queue)))
+      (tu/send-message textchannel "You're not in a voice channel?")
 
       @menu-action
       @menu-action
 
 
-      :else (println "Nothing"))))
+      :else
+      (println "Nothing"))))
+
+
+;; On Add Reaction
+(defmethod handle-event GuildMessageReactionAddEvent
+  [event]
+  (println event))
