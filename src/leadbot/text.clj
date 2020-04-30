@@ -7,7 +7,7 @@
   (:import
     (com.sedmelluq.discord.lavaplayer.player DefaultAudioPlayerManager AudioLoadResultHandler)
     (net.dv8tion.jda.api.events.message.guild GuildMessageReceivedEvent)
-    (net.dv8tion.jda.api.events.message.guild.react GuildMessageReactionAddEvent)))
+    (net.dv8tion.jda.api.events.message.react MessageReactionAddEvent)))
 
 
 
@@ -16,6 +16,9 @@
     :submenu
     [{:match #".*"
       :action audio/play-url}]}
+
+   {:match #"!nowplaying"
+    :action audio/now-playing}
 
    {:match #"!xkcd"
     :submenu
@@ -86,8 +89,8 @@
       (.isBot author)
       nil
 
-      (not voicechannel)
-      (tu/send-message textchannel "You're not in a voice channel?")
+      (not (str/starts-with? (.getContentStripped message) "!"))
+      (println "Ignoring, not a command")
 
       @menu-action
       @menu-action
@@ -98,6 +101,6 @@
 
 
 ;; On Add Reaction
-(defmethod handle-event GuildMessageReactionAddEvent
+(defmethod handle-event MessageReactionAddEvent
   [event]
   (println event))
