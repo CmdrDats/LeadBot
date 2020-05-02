@@ -3,7 +3,9 @@
     [clojure.java.io :as io]
     [clojure.edn :as edn]
     [leadbot.text :as text]
-    [nrepl.server])
+    [nrepl.server]
+    [leadbot.audio-utils :as au]
+    [leadbot.audio :as audio])
   (:import
     (java.util.concurrent Executors ExecutorService)
     (com.sedmelluq.discord.lavaplayer.player DefaultAudioPlayerManager AudioLoadResultHandler)
@@ -15,15 +17,11 @@
 
 
 
-
-
-
 ;; Serializable, saved state
 (def app-atom (atom {}))
 
 ;; Ephemeral system objects - non-serializable
 (def context-state (atom {}))
-
 
 (defn bot-event [event]
   (text/handle-event {:event event :app-atom app-atom :ctx @context-state}))
@@ -32,8 +30,10 @@
   (let [audio-manager (.getAudioManager guild)]
     (.closeAudioConnection audio-manager)))
 
-(defn shutdown [{{:keys [^ExecutorService threadpool
-                         ^JDA jda]} :ctx}]
+(defn shutdown
+  [{{:keys [^ExecutorService threadpool
+            ^JDA jda]} :ctx}]
+
   (spit "app-state.edn" @app-atom)
   (.shutdownNow threadpool)
   (when (not= JDA$Status/SHUTDOWN (.getStatus jda))
@@ -109,6 +109,7 @@
       (swap! context-state assoc
         :jda jda
         :threadpool (Executors/newScheduledThreadPool 4)
-        :playermanager playermanager)
+        :playermanager playermanager
+        :player audio/player-atom)
 
       (println "Setup and ready."))))

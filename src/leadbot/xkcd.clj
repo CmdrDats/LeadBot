@@ -13,3 +13,4 @@
         textchannel (.getTextChannel message)]
 
     (tu/send-message textchannel (str "https://xkcd.com/" last-match "/"))))
+
