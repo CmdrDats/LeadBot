@@ -4,21 +4,14 @@
     [leadbot.text-utils :as tu]
     [leadbot.queue-manager :as qm])
   (:import
-    (com.sedmelluq.discord.lavaplayer.player DefaultAudioPlayerManager AudioLoadResultHandler AudioPlayer AudioPlayerManager)
+    (com.sedmelluq.discord.lavaplayer.player AudioPlayer AudioPlayerManager)
     (net.dv8tion.jda.api.events.message.guild GuildMessageReceivedEvent)
-    (com.sedmelluq.discord.lavaplayer.track AudioPlaylist AudioTrack)
     (com.sedmelluq.discord.lavaplayer.player.event AudioEventListener TrackEndEvent TrackStartEvent AudioEvent)
     (net.dv8tion.jda.api.audio AudioSendHandler)
     (java.nio ByteBuffer)
     (com.sedmelluq.discord.lavaplayer.track.playback AudioFrame)
-    (net.dv8tion.jda.api.entities Guild)
+    (net.dv8tion.jda.api.entities Guild) ;; This is used for .setSendingHandler
     (net.dv8tion.jda.internal.entities ReceivedMessage)))
-
-
-(defn join-voice-channel [^Guild guild voicechannel]
-  (when-not (.inVoiceChannel (.getVoiceState (.getSelfMember guild)))
-    (.openAudioConnection (.getAudioManager guild) voicechannel)))
-
 
 
 (def player-atom (atom {}))
@@ -83,8 +76,9 @@
 
       ;; TODO: Instead of sending a new message, if the old one isn't too many messages ago, update it
       (if (.getPlayingTrack local-audioplayer)
-        (au/send-playing textchannel
-          (au/get-track-info local-audioplayer))
+        (tu/send-playing textchannel
+          (au/get-track-info
+            (au/get-playing-track local-audioplayer)))
         (tu/send-message textchannel "No song playing, to play type !play")))
 
     ;; Send Now Playing to where it last came from as we're an audio event
@@ -97,8 +91,9 @@
           textchannel (.getTextChannel message)]
 
       (if (.getPlayingTrack local-audioplayer)
-        (au/send-playing textchannel
-          (au/get-track-info local-audioplayer))
+        (tu/send-playing textchannel
+          (au/get-track-info
+            (au/get-playing-track local-audioplayer)))
         (tu/send-message textchannel "No song playing, to play type !play")))))
 
 
@@ -108,10 +103,16 @@
      (not (boolean (.getPlayingTrack (get-audioplayer ctx event))))))
 
   ([ctx ^GuildMessageReceivedEvent event track force-play?]
-   (let [^AudioPlayer local-audioplayer (get-audioplayer ctx event)]
-     (.startTrack local-audioplayer track (not force-play?))
+   (let [^AudioPlayer local-audioplayer (get-audioplayer ctx event)
+         voicechannel (.getChannel (.getVoiceState (.getMember event)))
+         textchannel (.getTextChannel (.getMessage event))]
 
-     (now-playing ctx event))))
+     (if-not voicechannel
+       (tu/send-message textchannel "Please join a voice channel")
+       (do
+         (au/join-voice-channel (.getGuild (.getMember event)) voicechannel)
+         (.startTrack local-audioplayer track (not force-play?))
+         (now-playing ctx event))))))
 
 (defn next-track [{:keys [^AudioPlayerManager playermanager] :as ctx} event & [menu]]
   (let [^AudioPlayer local-audioplayer (get-audioplayer ctx event)
@@ -151,54 +152,12 @@
     (.setPaused local-audioplayer false)
     (now-playing ctx event)))
 
-(defn load-playable-item
-  [{:keys [^DefaultAudioPlayerManager playermanager] :as ctx}
-   event textchannel url]
+(defn play [ctx event & [menu]]
+  (let [^AudioPlayer local-audioplayer (get-audioplayer ctx event)
+        track (qm/pop-queue ctx)]
 
-  (let [^AudioPlayer local-audioplayer (get-audioplayer ctx event)]
-    (.loadItem
-      playermanager url
-      (proxy [AudioLoadResultHandler] []
-        (trackLoaded [track]
-          (qm/update-queue ctx [track])
-          (when-not (.getPlayingTrack local-audioplayer)
-            (next-track ctx event))
-
-          (tu/send-message textchannel "Track Loaded"))
-
-        (playlistLoaded [^AudioPlaylist playlist]
-          (qm/update-queue ctx (.getTracks playlist))
-          (when-not (.getPlayingTrack local-audioplayer)
-            (next-track ctx event))
-
-          (tu/send-message textchannel "Playlist loaded"))
-
-        (noMatches []
-          (tu/send-message textchannel "No matches"))
-
-        (loadFailed [ex]
-          (tu/send-message textchannel "Load failed"))))))
-
-(defn play-url
-  [ctx ^GuildMessageReceivedEvent event
-   {:keys [last-match] :as menu}]
-
-  (let [message (.getMessage event)
-        member (.getMember event)
-        textchannel (.getTextChannel message)
-        voicechannel (.getChannel (.getVoiceState member))
-
-        url last-match]
-
-    (if (not voicechannel)
-      (tu/send-message textchannel "You're not in a voice channel?")
-      (do
-        (join-voice-channel (.getGuild event) voicechannel)
-        (tu/send-message textchannel (str "Let's do something with that"))
-        (load-playable-item ctx event textchannel url)))))
-
-(defn play-short-song [ctx event menu]
-  (play-url ctx event (assoc menu :last-match "https://www.youtube.com/watch?v=8SPtkjMUkGk")))
+    (when-not (au/get-playing-track local-audioplayer)
+      (play-track ctx event track))))
 
 
 ;; Handle Events from the audioplayer

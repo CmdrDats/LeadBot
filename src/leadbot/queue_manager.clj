@@ -5,7 +5,8 @@
     [clojure.string :as str])
   (:import
     (net.dv8tion.jda.internal.entities ReceivedMessage)
-    (com.sedmelluq.discord.lavaplayer.track AudioTrack)))
+    (com.sedmelluq.discord.lavaplayer.track AudioTrack AudioPlaylist)
+    (com.sedmelluq.discord.lavaplayer.player DefaultAudioPlayerManager AudioLoadResultHandler)))
 
 (defn get-queue [ctx]
   (let [player-atom (get-in ctx [:player])
@@ -42,7 +43,27 @@
         textchannel (.getTextChannel message)]
 
     (tu/send-message textchannel
-      (str "Current Queue:\n"
-        (str/join "\n"
-          (map #(.title (.getInfo ^AudioTrack %))
-            queue))))))
+      (if (empty? queue)
+        (str "Nothing in the queue right now")
+        (str "Current Queue:\n"
+          (str/join "\n"
+            (map #(.title (.getInfo ^AudioTrack %))
+              queue)))))))
+
+(defn load-playable-item-for-queue
+  [{:keys [^DefaultAudioPlayerManager playermanager] :as ctx} url]
+
+  (.loadItem
+    playermanager url
+    (proxy [AudioLoadResultHandler] []
+      (trackLoaded [track]
+        (update-queue ctx [track]))
+
+      (playlistLoaded [^AudioPlaylist playlist]
+        (update-queue ctx playlist))
+
+      (noMatches []
+        #_(tu/send-message textchannel "No matches"))
+
+      (loadFailed [ex]
+        #_(tu/send-message textchannel "Load failed")))))

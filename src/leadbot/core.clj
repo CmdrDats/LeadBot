@@ -2,10 +2,12 @@
   (:require
     [clojure.java.io :as io]
     [clojure.edn :as edn]
+    [leadbot.audio :as audio]
+    [leadbot.playlist :as pl]
     [leadbot.text :as text]
     [nrepl.server]
     [leadbot.audio-utils :as au]
-    [leadbot.audio :as audio])
+    [leadbot.db :as db])
   (:import
     (java.util.concurrent Executors ExecutorService)
     (com.sedmelluq.discord.lavaplayer.player DefaultAudioPlayerManager AudioLoadResultHandler)
@@ -63,7 +65,13 @@
       (spit ".nrepl-port" (:port nrepl))
       (println "nrepl port: " (:port nrepl)))
 
-    (let [jdabuilder
+    ;(db/create-db)
+    (let [db
+          (do
+            (try (db/create-db) (catch Exception e))
+            (db/setup-db))
+
+          jdabuilder
           (doto (JDABuilder.)
             (.setToken (:token config))
             ;(.setAudioSendFactory (NativeAudioSendFactory.))
@@ -110,6 +118,7 @@
         :jda jda
         :threadpool (Executors/newScheduledThreadPool 4)
         :playermanager playermanager
-        :player audio/player-atom)
+        :player audio/player-atom
+        :db db)
 
       (println "Setup and ready."))))

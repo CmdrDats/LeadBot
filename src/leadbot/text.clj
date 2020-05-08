@@ -3,9 +3,9 @@
     [clojure.string :as str]
     [leadbot.audio :as audio]
     [leadbot.bot :as bot]
+    [leadbot.playlist :as pl]
     [leadbot.text-utils :as tu]
     [leadbot.xkcd :as xkcd]
-    [leadbot.audio-utils :as au]
     [leadbot.queue-manager :as qm])
   (:import
     (com.sedmelluq.discord.lavaplayer.player DefaultAudioPlayerManager AudioLoadResultHandler)
@@ -16,19 +16,45 @@
 
 (declare send-help)
 
+;; TODO: Implement default actions when no submenu matched
 (def command-menu
-  [;; Music Controls
-   {:match #"!play"
+  [;; Playlist Management
+   {:match #"!playlist"
     :submenu
-    [{:match #"s"
-      :doccmd "!play s"
-      :docstring "Play's the short song"
-      :action #'audio/play-short-song}
-     {:match #".*"
-      :doccmd "!play <url>"
-      :docstring "Play's the url (YouTube / Soundcloud / etc)"
-      :action #'audio/play-url}]}
+    [{:match #"add"
+      :submenu
+      [{:match #".*"
+        :doccmd "!playlist add <url>"
+        :docstring "Add the url (YouTube / Soundcloud / etc) to your playlist"
+        :action #'pl/add-song}]}
 
+     {:match #"list"
+      :doccmd "!playlist list"
+      :docstring "Lists the songs on your playlist"
+      :action #'pl/list-my-songs
+      #_:submenu
+      #_[{:match #".*"
+          :doccmd "!playlist list <playlistname/username>"
+          :docstring "List the playlist for <playlistname/username>"
+          :action #'pl/list-songs}]}]}
+
+   {:match #"!load"
+    :doccmd "!load"
+    :docstring "Load my playlist into the queue"
+    :action #'pl/load-my-playlist
+    #_:submenu
+    #_[{:match #".*"
+        :doccmd "!load <playlist>"
+        :docstring "Load the <playlist> into the queue"
+        :action #'pl/load-playlist}]}
+
+   ;; Queue Management
+   {:match #"!queue"
+    :doccmd "!queue"
+    :docstring "Print the current song queue"
+    :action #'qm/print-queue}
+
+   ;; Music Controls
    {:match #"!nowplaying"
     :doccmd "!nowplaying"
     :docstring "Sends the current playing song to the channel"
@@ -48,11 +74,6 @@
     :doccmd "!resume"
     :docstring "Resume the in-play song"
     :action #'audio/resume-track}
-
-   {:match #"!queue"
-    :doccmd "!queue"
-    :docstring "Print the current song queue"
-    :action #'qm/print-queue}
 
    ;; Bot Controls
    {:match #"!join"

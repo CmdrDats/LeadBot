@@ -3,25 +3,29 @@
     [leadbot.text-utils :as tu])
   (:import
     (net.dv8tion.jda.api EmbedBuilder)
-    (com.sedmelluq.discord.lavaplayer.player AudioPlayer)))
+    (com.sedmelluq.discord.lavaplayer.player AudioPlayer)
+    (com.sedmelluq.discord.lavaplayer.track AudioTrack)
+    (net.dv8tion.jda.api.entities Guild)))
+
+(defn join-voice-channel [^Guild guild voicechannel]
+  (when-not (.inVoiceChannel (.getVoiceState (.getSelfMember guild)))
+    (.openAudioConnection (.getAudioManager guild) voicechannel)))
+
+(defn get-playing-track [^AudioPlayer local-audioplayer]
+  (.getPlayingTrack local-audioplayer))
+
+(defn get-track-info [^AudioTrack track]
+  {:title (.title (.getInfo track))
+   :author (.author (.getInfo track))
+   :link (.uri (.getInfo track))
+   :seek (.getPosition track)
+   :duration (.getDuration track)})
+
+(defn get-track-info-schema [^AudioTrack track]
+  {:track/title (.title (.getInfo track))
+   :track/author (.author (.getInfo track))
+   :track/link (.uri (.getInfo track))
+   ;:track/seek (.getPosition track)
+   :track/duration (.getDuration track)})
 
 
-(defn send-playing [textchannel {:keys [title author seek duration]}]
-  (let [embed
-        (doto (EmbedBuilder.)
-          (.setTitle "Now Playing")
-          (.setDescription (str title " - " author))
-          ;(.addBlankField true)
-          (.addField
-            (str "Progress - " (quot (* seek 100) duration) "%")
-            (str seek "s / " duration "s")
-            false))]
-
-    (tu/send-message textchannel (.build embed))))
-
-(defn get-track-info [^AudioPlayer local-audioplayer]
-  {:title (.title (.getInfo (.getPlayingTrack local-audioplayer)))
-   :author (.author (.getInfo (.getPlayingTrack local-audioplayer)))
-   :link (.uri (.getInfo (.getPlayingTrack local-audioplayer)))
-   :seek (quot (.getPosition (.getPlayingTrack local-audioplayer)) 1000)
-   :duration (quot (.getDuration (.getPlayingTrack local-audioplayer)) 1000)})

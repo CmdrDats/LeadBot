@@ -11,6 +11,7 @@
    [com.sedmelluq/lavaplayer-natives-extra "1.3.13"]
    [com.sedmelluq/jda-nas "1.1.0"]
    [com.jagrosh/JLyrics "0.4"]
+   [io.replikativ/datahike "0.2.1"]
    [nrepl "0.6.0"]]
   :repositories
   [["bintray" {:id "bintray" :url "https://jcenter.bintray.com"}]
