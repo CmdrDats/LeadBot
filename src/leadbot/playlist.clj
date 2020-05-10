@@ -4,10 +4,56 @@
     [leadbot.audio-utils :as au]
     [leadbot.db :as db]
     [leadbot.queue-manager :as qm]
-    [leadbot.text-utils :as tu])
+    [leadbot.text-utils :as tu]
+    [leadbot.util :as u]
+    [clojure.string :as str])
   (:import (com.sedmelluq.discord.lavaplayer.track AudioPlaylist)
            (com.sedmelluq.discord.lavaplayer.player DefaultAudioPlayerManager AudioLoadResultHandler)
            (net.dv8tion.jda.api.events.message.guild GuildMessageReceivedEvent)))
+
+(defn remove-track-by-id [db id user]
+  (db/write-single db [:db/retract id :playlist/name user]))
+
+(defn remove-http [{:keys [db]} textchannel user last-match]
+  (let [track-id (db/get-track-by-link db last-match)
+        track (db/get-ent db track-id)]
+
+    (remove-track-by-id db track-id user)
+    (tu/send-message textchannel (str "Removed: " (:track/title track)))))
+
+(defn remove-num [{:keys [db]} textchannel user last-match]
+  ;; TODO: This isn't the correct way but it's something to test with
+
+  (let [playlist
+        (map #(db/make-pretty-map %)
+          (db/list-playlist db user))
+
+        to-delete (get playlist (int last-match))
+        track-id (u/tonumber (db/get-track-by-link db (:track/source to-delete)))
+        track (db/get-ent db track-id)]
+
+    (if (and to-delete track-id)
+      (do
+        (remove-track-by-id db track-id user)
+        (tu/send-message textchannel (str "Removed: " (:track/title track))))
+      (tu/send-message textchannel "Soon you'll have a menu that can move!"))))
+
+(defn remove-song
+  [ctx
+   ^GuildMessageReceivedEvent event
+   {:keys [last-match] :as menu}]
+
+  (let [message (.getMessage event)
+        textchannel (.getTextChannel message)
+        user (.getName (.getAuthor event))]
+
+    (tu/send-message textchannel (str "Let me do something with that"))
+    (cond
+      (str/includes? last-match "http")
+      (remove-http ctx textchannel user last-match)
+
+      :else
+      (remove-num ctx textchannel user last-match))))
 
 (defn load-playable-item
   [{:keys [^DefaultAudioPlayerManager playermanager db] :as ctx}
@@ -35,10 +81,12 @@
           (tu/send-message textchannel "Track Loaded"))
 
         (playlistLoaded [^AudioPlaylist playlist]
-          (->>
-            (.getTracks playlist)
-            (map #(merge (au/get-track-info-schema %) add-info))
-            (db/write-data db))
+          (doseq [part
+                  (->>
+                    (.getTracks playlist)
+                    (map #(merge (au/get-track-info-schema %) add-info))
+                    (partition-all 10))]
+            (db/write-data db (vec part)))
           (tu/send-message textchannel "Playlist loaded"))
 
         (noMatches []
@@ -61,20 +109,24 @@
         textchannel (.getTextChannel message)
 
         playlist-name last-match
-        playlist (db/list-playlist db playlist-name)]
+        playlist
+        (map #(db/make-pretty-map %)
+          (db/list-playlist db playlist-name))]
 
     (tu/send-message textchannel
-      (tu/build-playlist-message playlist))))
+      (tu/build-track-list ctx event (str "Playlist: " playlist-name) playlist))))
 
 (defn list-my-songs [{:keys [^DefaultAudioPlayerManager playermanager db] :as ctx} ^GuildMessageReceivedEvent event menu]
   (let [message (.getMessage event)
         textchannel (.getTextChannel message)
 
         playlist-name (.getName (.getAuthor event))
-        playlist (db/list-playlist db playlist-name)]
+        playlist
+        (map #(db/make-pretty-map %)
+          (db/list-playlist db playlist-name))]
 
     (tu/send-message textchannel
-      (tu/build-playlist-message playlist))))
+      (tu/build-track-list ctx event (str "Playlist: " playlist-name "\n*!playlist select <number>*") playlist))))
 
 
 (defn load-playlist
@@ -89,12 +141,17 @@
         playlist (db/list-playlist db playlist-name)]
 
     (doseq [t playlist]
-      (qm/load-playable-item-for-queue ctx (get t :track/url)))
+      (qm/load-playable-item-for-queue
+        ctx event
+        {:track-fn #(audio/play-track ctx event %)
+         :playlist-fn
+         #(do
+            (qm/update-queue ctx (rest (.getTracks %)))
+            (audio/play-track ctx event (first (.getTracks %))))}
+        (get t :track/url)))
 
     (tu/send-message textchannel
-      (str "The playlist '" playlist-name "' has been added to the queue"))
-
-    (audio/play ctx event)))
+      (str "The playlist '" playlist-name "' has been added to the queue"))))
 
 (defn load-my-playlist
   [{:keys [^DefaultAudioPlayerManager db] :as ctx}
@@ -107,12 +164,20 @@
         playlist (db/list-playlist db playlist-name)]
 
     (doseq [t playlist]
-      (qm/load-playable-item-for-queue ctx (get t :track/link)))
+      (qm/load-playable-item-for-queue
+        ctx event
+        {:track-fn
+         #(do
+            (qm/update-queue ctx [%])
+            (audio/play ctx event))
+         :playlist-fn
+         #(do
+            (qm/update-queue ctx (rest (.getTracks %)))
+            (audio/play-track ctx event (first (.getTracks %))))}
+        (get t :track/link)))
 
     (tu/send-message textchannel
-      (str "The playlist '" playlist-name "' has been added to the queue"))
-
-    (audio/play ctx event)))
+      (str "The playlist '" playlist-name "' has been added to the queue"))))
 
 
 ;; ;;
@@ -142,16 +207,15 @@
   (db/write-data db song-list)
 
   ;; Select All and Display Nicely
-  (defn make-map [entity] (into {} (map (fn [k] [k (get entity k)]) (keys entity))))
   (do
     (def all-songs
       (->> (db/select-all db)
-           (map make-map)))
+           (map make-pretty-map)))
     all-songs)
 
   ;; List by playlist
   (do
-    (def pla (map make-map (db/list-playlist db "theonlysinjin")))
+    (def pla (map make-pretty-map (db/list-playlist db "theonlysinjin")))
     pla)
 
 

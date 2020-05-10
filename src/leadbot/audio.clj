@@ -10,8 +10,9 @@
     (net.dv8tion.jda.api.audio AudioSendHandler)
     (java.nio ByteBuffer)
     (com.sedmelluq.discord.lavaplayer.track.playback AudioFrame)
-    (net.dv8tion.jda.api.entities Guild) ;; This is used for .setSendingHandler
-    (net.dv8tion.jda.internal.entities ReceivedMessage)))
+    (net.dv8tion.jda.api.entities Guild Activity)           ;; This is used for .setSendingHandler
+    (net.dv8tion.jda.internal.entities ReceivedMessage)
+    (net.dv8tion.jda.api JDA)))
 
 
 (def player-atom (atom {}))
@@ -23,8 +24,8 @@
         (doto (.createPlayer playermanager)
           (.addListener
             (proxy [AudioEventListener] []
-              (onEvent [event]
-                #(audio-event ctx event)))))
+              (onEvent [e]
+                #(audio-event ctx e)))))
 
         guild (.getGuild (.getMember event))
         lastframe (atom nil)]
@@ -60,7 +61,7 @@
 
 
 
-(defn now-playing [ctx event & [menu]]
+(defn now-playing [{:keys [^JDA jda] :as ctx} event & [menu]]
   (condp = (class event)
 
     ;; Send Now Playing from wherever the message came from (!play / !nowplaying)
@@ -76,9 +77,10 @@
 
       ;; TODO: Instead of sending a new message, if the old one isn't too many messages ago, update it
       (if (.getPlayingTrack local-audioplayer)
-        (tu/send-playing textchannel
-          (au/get-track-info
-            (au/get-playing-track local-audioplayer)))
+        (let [t-info (au/get-track-info (au/get-playing-track local-audioplayer))]
+          ;(Activity/playing "Loading..")
+          (.setPresence (.getPresence jda) (Activity/playing (str (:title t-info) " (" (:author t-info) ")")) false)
+          (tu/send-playing textchannel t-info))
         (tu/send-message textchannel "No song playing, to play type !play")))
 
     ;; Send Now Playing to where it last came from as we're an audio event
@@ -103,16 +105,18 @@
      (not (boolean (.getPlayingTrack (get-audioplayer ctx event))))))
 
   ([ctx ^GuildMessageReceivedEvent event track force-play?]
-   (let [^AudioPlayer local-audioplayer (get-audioplayer ctx event)
-         voicechannel (.getChannel (.getVoiceState (.getMember event)))
-         textchannel (.getTextChannel (.getMessage event))]
+   (when force-play?
+     (let [^AudioPlayer local-audioplayer (get-audioplayer ctx event)
+           voicechannel (.getChannel (.getVoiceState (.getMember event)))
+           textchannel (.getTextChannel (.getMessage event))]
 
-     (if-not voicechannel
-       (tu/send-message textchannel "Please join a voice channel")
-       (do
-         (au/join-voice-channel (.getGuild (.getMember event)) voicechannel)
-         (.startTrack local-audioplayer track (not force-play?))
-         (now-playing ctx event))))))
+       (if-not voicechannel
+         (tu/send-message textchannel "Please join a voice channel")
+         (do
+           (au/join-voice-channel (.getGuild (.getMember event)) voicechannel)
+           (.startTrack local-audioplayer track (not force-play?))
+           (Thread/sleep 1000)
+           (now-playing ctx event)))))))
 
 (defn next-track [{:keys [^AudioPlayerManager playermanager] :as ctx} event & [menu]]
   (let [^AudioPlayer local-audioplayer (get-audioplayer ctx event)
@@ -146,18 +150,16 @@
     (tu/send-message textchannel "Paused. To resume, !resume")))
 
 (defn resume-track [ctx event & [menu]]
-  (let [^AudioPlayer local-audioplayer (get-audioplayer ctx event)
-        message (.getMessage event)]
+  (let [^AudioPlayer local-audioplayer (get-audioplayer ctx event)]
 
     (.setPaused local-audioplayer false)
     (now-playing ctx event)))
 
 (defn play [ctx event & [menu]]
-  (let [^AudioPlayer local-audioplayer (get-audioplayer ctx event)
-        track (qm/pop-queue ctx)]
+  (let [^AudioPlayer local-audioplayer (get-audioplayer ctx event)]
 
     (when-not (au/get-playing-track local-audioplayer)
-      (play-track ctx event track))))
+      (play-track ctx event (qm/pop-queue ctx)))))
 
 
 ;; Handle Events from the audioplayer

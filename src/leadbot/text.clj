@@ -28,6 +28,13 @@
         :docstring "Add the url (YouTube / Soundcloud / etc) to your playlist"
         :action #'pl/add-song}]}
 
+     {:match #"remove"
+      :submenu
+      [{:match #".*"
+        :doccmd "!playlist remove <url / listID>"
+        :docstring "Remove the specific song from your playlist"
+        :action #'pl/remove-song}]}
+
      {:match #"list"
       :doccmd "!playlist list"
       :docstring "Lists the songs on your playlist"
@@ -54,6 +61,11 @@
     :docstring "Print the current song queue"
     :action #'qm/print-queue}
 
+   {:match #"!play"
+    :doccmd "!play"
+    :docstring "Plays the first song in the queue if nothing is playing"
+    :action #'audio/play}
+
    ;; Music Controls
    {:match #"!nowplaying"
     :doccmd "!nowplaying"
@@ -74,6 +86,11 @@
     :doccmd "!resume"
     :docstring "Resume the in-play song"
     :action #'audio/resume-track}
+
+   {:match #"!shuffle"
+    :doccmd "!shuffle"
+    :docstring "Shuffle the current song list"
+    :action #'qm/shuffle-queue}
 
    ;; Bot Controls
    {:match #"!join"
@@ -160,6 +177,7 @@
                 m))))]
 
     (when action-fn
+      (println "Running action for: " selected-menu)
       (action-fn ctx event selected-menu))))
 
 
@@ -195,8 +213,17 @@
   (let [^ReceivedMessage message (.getMessage event)
         author (.getAuthor event)
 
-        menu-action
-        (future (menu-match ctx command-menu event (.getContentStripped message)))]
+
+        is-this-in-menu?
+        (fn [message]
+          (let [first-word (first (str/split (.getContentStripped message) #" "))
+                first-menu (map #(get % :match) command-menu)]
+
+            (reduce
+              (fn [acc regex]
+                (let [m (re-matches regex first-word)]
+                  (if (nil? m)acc m)))
+              first-menu)))]
 
     (cond
 
@@ -211,8 +238,8 @@
       (not (str/starts-with? (.getContentStripped message) "!"))
       (println "Ignoring, not a command")
 
-      @menu-action
-      @menu-action
+      (is-this-in-menu? message)
+      (menu-match ctx command-menu event (.getContentStripped message))
 
 
       :else

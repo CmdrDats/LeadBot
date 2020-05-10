@@ -43,24 +43,32 @@
         textchannel (.getTextChannel message)]
 
     (tu/send-message textchannel
-      (if (empty? queue)
-        (str "Nothing in the queue right now")
-        (str "Current Queue:\n"
-          (str/join "\n"
-            (map #(.title (.getInfo ^AudioTrack %))
-              queue)))))))
+      (tu/build-track-list ctx event "Current Queue\n*!pause | !resume | !next | !shuffle*" (map #(au/get-track-info-schema ^AudioTrack %) queue)))))
+
+(defn shuffle-queue [ctx event & [menu]]
+  (let [^ReceivedMessage message (.getMessage event)
+        textchannel (.getTextChannel message)
+
+        player-atom (get-in ctx [:player])
+        queue
+        (:queue
+          (swap! player-atom update :queue shuffle))]
+
+    (tu/send-message textchannel "Queue Shuffled")
+    (tu/send-message textchannel
+      (tu/build-track-list ctx event "Current Queue\n*!pause | !resume | !next | !shuffle*" (map #(au/get-track-info-schema ^AudioTrack %) queue)))))
 
 (defn load-playable-item-for-queue
-  [{:keys [^DefaultAudioPlayerManager playermanager] :as ctx} url]
+  [{:keys [^DefaultAudioPlayerManager playermanager] :as ctx} event {:keys [track-fn playlist-fn]} url]
 
   (.loadItem
     playermanager url
     (proxy [AudioLoadResultHandler] []
       (trackLoaded [track]
-        (update-queue ctx [track]))
+        (track-fn track))
 
       (playlistLoaded [^AudioPlaylist playlist]
-        (update-queue ctx playlist))
+        (playlist-fn playlist))
 
       (noMatches []
         #_(tu/send-message textchannel "No matches"))

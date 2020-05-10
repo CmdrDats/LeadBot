@@ -1,6 +1,8 @@
 (ns leadbot.db
   (:require [datahike.api :as d]))
 
+;; TODO: Add Queue attributes
+;; inqueue? queue
 (def schema
   [{:db/ident :track/title
     :db/valueType :db.type/string
@@ -44,8 +46,8 @@
 
 (defn write-data [db data]
   (println "Writing to DB:
-  " data)
-  (d/transact db data))
+  " data "
+  " (d/transact db data)))
 
 (defn write-single [db data]
   (write-data db [data]))
@@ -76,6 +78,26 @@
 
     (map #(d/entity d (first %)) q)))
 
+(defn get-track-by-link [db source-link]
+  (let [d @db
+        q
+        (d/q
+          {:query
+           '[:find ?e
+             :in $ ?tl
+             :where
+             [?e :track/link ?tl]]
+           :args
+           [d source-link]}
+          d)]
+
+    (first q)))
+
+(defn make-pretty-map [entity] (into {} (map (fn [k] [k (get entity k)]) (keys entity))))
+(defn get-ent [db eid]
+  (->
+    (d/entity db eid)
+    make-pretty-map))
 
 (defn setup-db []
   (let [db (connect)]

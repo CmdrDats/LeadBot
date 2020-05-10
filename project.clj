@@ -12,7 +12,8 @@
    [com.sedmelluq/jda-nas "1.1.0"]
    [com.jagrosh/JLyrics "0.4"]
    [io.replikativ/datahike "0.2.1"]
-   [nrepl "0.6.0"]]
+   [nrepl "0.6.0"]
+   [org.clojure/data.json "1.0.0"]]
   :repositories
   [["bintray" {:id "bintray" :url "https://jcenter.bintray.com"}]
    ["bintray-sedmelluq" {:id "bintray-sedmelluq" :url "https://dl.bintray.com/sedmelluq/com.sedmelluq"}]]
