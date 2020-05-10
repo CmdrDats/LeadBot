@@ -3,7 +3,7 @@
     [leadbot.audio :as audio]
     [leadbot.audio-utils :as au]
     [leadbot.db :as db]
-    [leadbot.queue-manager :as qm]
+    [leadbot.queue :as qm]
     [leadbot.text-utils :as tu]
     [leadbot.util :as u]
     [clojure.string :as str])
@@ -114,7 +114,9 @@
           (db/list-playlist db playlist-name))]
 
     (tu/send-message textchannel
-      (tu/build-track-list ctx event (str "Playlist: " playlist-name) playlist))))
+      (tu/build-track-list
+        (str "Playlist: " playlist-name " (" (count playlist) ")" "\n*!playlist remove <number> | !playlist scroll*")
+        playlist))))
 
 (defn list-my-songs [{:keys [^DefaultAudioPlayerManager playermanager db] :as ctx} ^GuildMessageReceivedEvent event menu]
   (let [message (.getMessage event)
@@ -126,7 +128,9 @@
           (db/list-playlist db playlist-name))]
 
     (tu/send-message textchannel
-      (tu/build-track-list ctx event (str "Playlist: " playlist-name "\n*!playlist select <number>*") playlist))))
+      (tu/build-track-list
+        (str "Playlist: " playlist-name " (" (count playlist) ")" "\n*!playlist remove <number> | !playlist scroll*")
+        playlist))))
 
 
 (defn load-playlist
@@ -161,7 +165,10 @@
         textchannel (.getTextChannel message)
 
         playlist-name (.getName (.getAuthor event))
-        playlist (db/list-playlist db playlist-name)]
+        playlist (db/list-playlist db playlist-name)
+
+        player-atom (get-in ctx [:player])
+        _ (swap! player-atom assoc :last-chat-event event)]
 
     (doseq [t playlist]
       (qm/load-playable-item-for-queue
@@ -179,6 +186,10 @@
     (tu/send-message textchannel
       (str "The playlist '" playlist-name "' has been added to the queue"))))
 
+(defn scroll-list [{:keys [^DefaultAudioPlayerManager playermanager db] :as ctx} ^GuildMessageReceivedEvent event menu]
+  (let [message (.getMessage event)
+        textchannel (.getTextChannel message)]
+    (tu/send-message textchannel "This feature has not been implemented yet")))
 
 ;; ;;
 

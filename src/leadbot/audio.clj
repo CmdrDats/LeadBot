@@ -2,11 +2,11 @@
   (:require
     [leadbot.audio-utils :as au]
     [leadbot.text-utils :as tu]
-    [leadbot.queue-manager :as qm])
+    [leadbot.queue :as qm])
   (:import
     (com.sedmelluq.discord.lavaplayer.player AudioPlayer AudioPlayerManager)
     (net.dv8tion.jda.api.events.message.guild GuildMessageReceivedEvent)
-    (com.sedmelluq.discord.lavaplayer.player.event AudioEventListener TrackEndEvent TrackStartEvent AudioEvent)
+    (com.sedmelluq.discord.lavaplayer.player.event AudioEventListener TrackEndEvent TrackStartEvent AudioEvent PlayerResumeEvent)
     (net.dv8tion.jda.api.audio AudioSendHandler)
     (java.nio ByteBuffer)
     (com.sedmelluq.discord.lavaplayer.track.playback AudioFrame)
@@ -17,7 +17,10 @@
 
 (def player-atom (atom {}))
 
-(declare audio-event)
+;; Handle Events from the audioplayer
+(defmulti handle-audio-event (fn [req] (class (:event req))))
+(defn audio-event [ctx event]
+  (handle-audio-event {:event event :ctx ctx}))
 
 (defn create-audioplayer [{:keys [^AudioPlayerManager playermanager] :as ctx} event]
   (let [local-audioplayer
@@ -25,7 +28,7 @@
           (.addListener
             (proxy [AudioEventListener] []
               (onEvent [e]
-                #(audio-event ctx e)))))
+                (audio-event ctx e)))))
 
         guild (.getGuild (.getMember event))
         lastframe (atom nil)]
@@ -60,6 +63,25 @@
           (create-audioplayer ctx event))))))
 
 
+(defn now-playing-from-saved [{:keys [^JDA jda] :as ctx} event & [menu]]
+  (let [^AudioPlayer local-audioplayer (.player event)
+        player-atom (get-in ctx [:player])
+
+        ^GuildMessageReceivedEvent last-nowplaying-event
+        (:nowplaying-event @player-atom)
+
+        ^GuildMessageReceivedEvent last-chat-event
+        (:last-chat-event @player-atom)]
+
+    (if last-nowplaying-event
+      ;; TODO: I think we should only update if the message is faily recent
+      (tu/update-playing last-nowplaying-event
+        (au/get-track-info
+          (au/get-playing-track local-audioplayer)))
+
+      (tu/send-playing (.getTextChannel (.getMessage last-chat-event))
+        (au/get-track-info
+          (au/get-playing-track local-audioplayer))))))
 
 (defn now-playing [{:keys [^JDA jda] :as ctx} event & [menu]]
   (condp = (class event)
@@ -78,28 +100,26 @@
       ;; TODO: Instead of sending a new message, if the old one isn't too many messages ago, update it
       (if (.getPlayingTrack local-audioplayer)
         (let [t-info (au/get-track-info (au/get-playing-track local-audioplayer))]
-          ;(Activity/playing "Loading..")
           (.setPresence (.getPresence jda) (Activity/playing (str (:title t-info) " (" (:author t-info) ")")) false)
           (tu/send-playing textchannel t-info))
         (tu/send-message textchannel "No song playing, to play type !play")))
 
     ;; Send Now Playing to where it last came from as we're an audio event
-    TrackEndEvent
-    (let [^AudioPlayer local-audioplayer (.player event)
+    TrackStartEvent
+    (now-playing-from-saved ctx event menu)
 
-          player-atom (get-in ctx [:player])
-          ^GuildMessageReceivedEvent last-nowplaying-event (:nowplaying-event @player-atom)
-          ^ReceivedMessage message (.getMessage last-nowplaying-event)
-          textchannel (.getTextChannel message)]
+    PlayerResumeEvent
+    (now-playing-from-saved ctx event menu)
 
-      (if (.getPlayingTrack local-audioplayer)
-        (tu/send-playing textchannel
-          (au/get-track-info
-            (au/get-playing-track local-audioplayer)))
-        (tu/send-message textchannel "No song playing, to play type !play")))))
+    :default
+    (println "No Matching Now Playing Event")))
 
 
 (defn play-track
+  ([ctx ^GuildMessageReceivedEvent event]
+   (tu/send-message (.getTextChannel (.getMessage event)) "No song to play, try, *!load | !pla")
+   (.startTrack (get-audioplayer ctx event) nil))
+
   ([ctx ^GuildMessageReceivedEvent event track]
    (play-track ctx event track
      (not (boolean (.getPlayingTrack (get-audioplayer ctx event))))))
@@ -108,38 +128,24 @@
    (when force-play?
      (let [^AudioPlayer local-audioplayer (get-audioplayer ctx event)
            voicechannel (.getChannel (.getVoiceState (.getMember event)))
-           textchannel (.getTextChannel (.getMessage event))]
+           textchannel (.getTextChannel (.getMessage event))
+
+           ;; If there's nothing playing and you force a play, you get two Start Events
+           really-force-play?
+           (if (boolean (.getPlayingTrack (get-audioplayer ctx event)))
+             force-play?
+             false)]
 
        (if-not voicechannel
          (tu/send-message textchannel "Please join a voice channel")
          (do
            (au/join-voice-channel (.getGuild (.getMember event)) voicechannel)
-           (.startTrack local-audioplayer track (not force-play?))
-           (Thread/sleep 1000)
-           (now-playing ctx event)))))))
+           (.startTrack local-audioplayer track (not really-force-play?))))))))
 
 (defn next-track [{:keys [^AudioPlayerManager playermanager] :as ctx} event & [menu]]
   (let [^AudioPlayer local-audioplayer (get-audioplayer ctx event)
         track (qm/pop-queue ctx)]
-
-
-    ;; TODO: Fix Hack
-    ;; Bit of a hack, I've had to remove and add the AudioEventListener
-    ;; because when we stop the track to change to the next song,
-    ;; it fires off a TrackEnd event which then we handle as a "Oh let's play the next one"
-    (doto local-audioplayer
-      (.removeListener
-        (proxy [AudioEventListener] []
-          (onEvent [event]
-            #(audio-event ctx event)))))
-
-    (play-track ctx event track true)
-
-    (doto local-audioplayer
-      (.addListener
-        (proxy [AudioEventListener] []
-          (onEvent [event]
-            #(audio-event ctx event)))))))
+    (play-track ctx event track true)))
 
 (defn pause-track [ctx event & [menu]]
   (let [^AudioPlayer local-audioplayer (get-audioplayer ctx event)
@@ -153,17 +159,34 @@
   (let [^AudioPlayer local-audioplayer (get-audioplayer ctx event)]
 
     (.setPaused local-audioplayer false)
-    (now-playing ctx event)))
+    #_(now-playing ctx event)))
 
-(defn play [ctx event & [menu]]
-  (let [^AudioPlayer local-audioplayer (get-audioplayer ctx event)]
+(defn play [ctx event & [{:keys [args] :as menu}]]
+  (let [^AudioPlayer local-audioplayer (get-audioplayer ctx event)
+        player-atom (get-in ctx [:player])
+        _ (swap! player-atom assoc :last-chat-event event)]
 
-    (when-not (au/get-playing-track local-audioplayer)
+    (cond
+      (pos? (count args))
+      (qm/load-playable-item-for-queue
+        ctx event
+        {:track-fn
+         #(do
+            (qm/update-queue ctx [%])
+            (tu/send-message (.getTextChannel (.getMessage event)) "Added to queue")
+            (play ctx event))
+         :playlist-fn
+         #(do
+            (qm/update-queue ctx (.getTracks %))
+            (tu/send-message (.getTextChannel (.getMessage event)) "Added to queue")
+            (play ctx event))}
+        (first args))
+
+      (not (au/get-playing-track local-audioplayer))
       (play-track ctx event (qm/pop-queue ctx)))))
 
 
 ;; Handle Events from the audioplayer
-(defmulti handle-audio-event (fn [req] (class (:event req))))
 
 (defmethod handle-audio-event :default [{:keys [event]}]
   (println "Unhandled -Audio- event class:" (class event)))
@@ -171,12 +194,22 @@
 (defmethod handle-audio-event TrackStartEvent
   [{:keys [event ctx]}]
   (println "Track has started")
-  )
+  ;; Problem is first time we start we don't have a saved now playing event to send to
+  (now-playing ctx event))
+
+(defn next-track-audio-event [ctx]
+  (let [track (qm/pop-queue ctx)
+        player-atom (get-in ctx [:player])
+        ^GuildMessageReceivedEvent last-chat-event (:last-chat-event @player-atom)]
+    (play-track ctx last-chat-event track true)))
 
 (defmethod handle-audio-event TrackEndEvent
   [{:keys [event ctx]}]
-  (println "Track has stopped")
-  (next-track ctx event))
+  (println "Track has stopped, Start next track if we need to: "
+    (.mayStartNext (.endReason event)))
+  (when (.mayStartNext (.endReason event))
+    (next-track-audio-event ctx)))
 
-(defn audio-event [ctx event]
-  (handle-audio-event {:event event :ctx ctx}))
+(defmethod handle-audio-event PlayerResumeEvent
+  [{:keys [event ctx]}]
+  (now-playing ctx event))

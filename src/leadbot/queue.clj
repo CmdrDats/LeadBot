@@ -1,4 +1,4 @@
-(ns leadbot.queue-manager
+(ns leadbot.queue
   (:require
     [leadbot.text-utils :as tu]
     [leadbot.audio-utils :as au]
@@ -43,7 +43,9 @@
         textchannel (.getTextChannel message)]
 
     (tu/send-message textchannel
-      (tu/build-track-list ctx event "Current Queue\n*!pause | !resume | !next | !shuffle*" (map #(au/get-track-info-schema ^AudioTrack %) queue)))))
+      (tu/build-track-list
+        (str "Current Queue (" (count queue) ")" "\n*!pause | !resume | !next | !shuffle*")
+        (map #(au/get-track-info-schema ^AudioTrack %) queue)))))
 
 (defn shuffle-queue [ctx event & [menu]]
   (let [^ReceivedMessage message (.getMessage event)
@@ -56,7 +58,9 @@
 
     (tu/send-message textchannel "Queue Shuffled")
     (tu/send-message textchannel
-      (tu/build-track-list ctx event "Current Queue\n*!pause | !resume | !next | !shuffle*" (map #(au/get-track-info-schema ^AudioTrack %) queue)))))
+      (tu/build-track-list
+        "Current Queue\n*!pause | !resume | !next | !shuffle*"
+        (map #(au/get-track-info-schema ^AudioTrack %) queue)))))
 
 (defn load-playable-item-for-queue
   [{:keys [^DefaultAudioPlayerManager playermanager] :as ctx} event {:keys [track-fn playlist-fn]} url]

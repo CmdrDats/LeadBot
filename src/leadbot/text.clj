@@ -6,7 +6,7 @@
     [leadbot.playlist :as pl]
     [leadbot.text-utils :as tu]
     [leadbot.xkcd :as xkcd]
-    [leadbot.queue-manager :as qm])
+    [leadbot.queue :as qm])
   (:import
     (com.sedmelluq.discord.lavaplayer.player DefaultAudioPlayerManager AudioLoadResultHandler)
     (net.dv8tion.jda.api.events.message.guild GuildMessageReceivedEvent)
@@ -39,6 +39,16 @@
       :doccmd "!playlist list"
       :docstring "Lists the songs on your playlist"
       :action #'pl/list-my-songs
+      #_:submenu
+      #_[{:match #".*"
+          :doccmd "!playlist list <playlistname/username>"
+          :docstring "List the playlist for <playlistname/username>"
+          :action #'pl/list-songs}]}
+
+     {:match #"scroll"
+      :doccmd "!playlist scroll"
+      :docstring "Scrolls the list that's displayed by, !playlist list"
+      :action #'pl/scroll-list
       #_:submenu
       #_[{:match #".*"
           :doccmd "!playlist list <playlistname/username>"
@@ -181,18 +191,25 @@
       (action-fn ctx event selected-menu))))
 
 
-(defn is-playing-message? [^MessageEmbed embed]
+(defn is-playing-embed? [^MessageEmbed embed]
   (= "Now Playing" (.getTitle embed)))
+
+(defn is-playing-message? [^ReceivedMessage message]
+  (= (.getContentStripped message) "Now Playing... Loading"))
 
 (defn bot-received [ctx event]
   (let [^ReceivedMessage message (.getMessage event)
-        author (.getAuthor event)
         embeds (.getEmbeds message)
         player-atom (get-in ctx [:player])]
 
-    (when (pos? (count embeds))
+    (cond
+      (is-playing-message? message)
+      (swap! player-atom assoc
+        :nowplaying-event event)
+
+      (pos? (count embeds))
       (doseq [e embeds]
-        (when (is-playing-message? e)
+        (when (is-playing-embed? e)
           ;; TODO: This is our playing message, add reactions here for control
           ;; (Play / Pause) / Next / Vote
           (swap! player-atom assoc

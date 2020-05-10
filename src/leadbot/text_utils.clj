@@ -2,10 +2,11 @@
   (:require [clojure.string :as str]
             [clojure.data.json :as json])
   (:import
-    (net.dv8tion.jda.internal.entities TextChannelImpl)
+    (net.dv8tion.jda.internal.entities TextChannelImpl ReceivedMessage)
     (net.dv8tion.jda.api EmbedBuilder MessageBuilder)
     (net.dv8tion.jda.api.events.message.guild GuildMessageReceivedEvent)
-    (javax.swing.text.rtf Constants)))
+    (javax.swing.text.rtf Constants)
+    (net.dv8tion.jda.api.entities MessageEmbed)))
 
 ;; Bot Name
 (def myname "LeadBoat")
@@ -19,34 +20,39 @@
     (.sendMessage textchannel message))
   (println "Message Sent"))
 
-(defn send-playing [textchannel {:keys [title author seek duration]}]
+(defn build-now-playing [{:keys [title author seek duration]}]
+  (.build
+    (doto (EmbedBuilder.)
+      (.setTitle "Now Playing")
+      ;(.setDescription (str title " " author))
+      (.addField "Title:" title true)
+      (.addBlankField true)
+      (.addField "Artist:" author true)
+      (.addField
+        (str "Progress - " (quot (* seek 100) duration) "%")
+        (str (quot seek 1000) "s / " (quot duration 1000) "s")
+        false))))
 
-  (let [embed
-        (doto (EmbedBuilder.)
-          (.setTitle "Now Playing")
-          ;(.setDescription (str title " " author))
-          (.addField "Title:" title true)
-          (.addBlankField true)
-          (.addField "Artist:" author true)
-          (.addField
-            (str "Progress - " (quot (* seek 100) duration) "%")
-            (str (quot seek 1000) "s / " (quot duration 1000) "s")
-            false))]
+(defn send-playing [textchannel track]
+  (let [embed (build-now-playing track)]
+    (send-message textchannel embed)))
 
-    (send-message textchannel (.build embed))))
-
-
-(defn build-playlist-message [playlist]
-  (str "Playlist: (" (count playlist) ")\n"
-    (str/join "\n"
-      (map #(str (get % :track/title) " - " (get % :track/author) " [ " (get % :added/name) " ]")
-        (take 15 playlist)))))
+(defn update-playing [^GuildMessageReceivedEvent last-nowplaying-event track]
+  (let [^MessageEmbed embed (build-now-playing track)]
+    (.queue
+      (.editMessageById
+        (.getChannel last-nowplaying-event)
+        (.getMessageId last-nowplaying-event)
+        embed))
+    ;; TODO: I feel this should work but it's not. instead do above
+    #_(.queue (.apply (.editMessage (.getMessage last-nowplaying-event) embed) update-message))
+    ))
 
 (defn build-track-list
   ; tracks {:track/title :track/author :added/by}
-  ([ctx event title tracks]
-   (build-track-list ctx event title tracks nil))
-  ([ctx event title tracks selected]
+  ([title tracks]
+   (build-track-list title tracks nil))
+  ([title tracks selected]
    (let [t-list
          (map-indexed
            (fn [idx t]
@@ -77,11 +83,12 @@
          (->
            (fn [{:keys [selected] :as t}]
              (if selected
-               [(get t :idx) {(get t :track/title) (get t :track/author) :selected true}]
-               [(get t :idx) {(get t :track/title) (get t :track/author)}]))
+               [(get t :idx) {(get t :track/title) (get t :track/author) :length (str (quot (get t :track/duration) 1000) "s") :selected true}]
+               [(get t :idx) {(get t :track/title) (get t :track/author) :length (str (quot (get t :track/duration) 1000) "s")}]))
            (map t-list)
            (json/write-str)
-           (str/replace #"],\[" "],\n ["))
+           (str/replace #"],\[" "],\n [") ; Drop each item on to its own line
+           )
 
          message
          (doto (MessageBuilder.)
