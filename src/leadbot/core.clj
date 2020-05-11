@@ -1,4 +1,5 @@
 (ns leadbot.core
+  (:gen-class)
   (:require
     [clojure.java.io :as io]
     [clojure.edn :as edn]
@@ -46,7 +47,7 @@
 (defn -main [& args]
   (let [config
         (try
-          (edn/read-string (slurp (io/resource "config.edn")))
+          (edn/read-string (slurp "config.edn"))
           (catch Exception e {}))]
     (reset! app-atom
       (or
