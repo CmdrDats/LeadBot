@@ -104,25 +104,16 @@
 (defn list-songs
   [{:keys [^DefaultAudioPlayerManager playermanager db] :as ctx}
    ^GuildMessageReceivedEvent event
-   {:keys [last-match] :as menu}]
+   {:keys [args] :as menu}]
   (let [message (.getMessage event)
         textchannel (.getTextChannel message)
 
-        playlist-name last-match
-        playlist
-        (map #(db/make-pretty-map %)
-          (db/list-playlist db playlist-name))]
 
-    (tu/send-message textchannel
-      (tu/build-track-list
-        (str "Playlist: " playlist-name " (" (count playlist) ")" "\n*!playlist remove <number> | !playlist scroll*")
-        playlist))))
+        playlist-name
+        (if (pos? (count args))
+          (first args)
+          (.getName (.getAuthor event)))
 
-(defn list-my-songs [{:keys [^DefaultAudioPlayerManager playermanager db] :as ctx} ^GuildMessageReceivedEvent event menu]
-  (let [message (.getMessage event)
-        textchannel (.getTextChannel message)
-
-        playlist-name (.getName (.getAuthor event))
         playlist
         (map #(db/make-pretty-map %)
           (db/list-playlist db playlist-name))]
@@ -135,40 +126,22 @@
 
 (defn load-playlist
   [{:keys [^DefaultAudioPlayerManager db] :as ctx}
-   ^GuildMessageReceivedEvent event
-   {:keys [last-match]}]
+   ^GuildMessageReceivedEvent event {:keys [args] :as menu}]
 
   (let [message (.getMessage event)
         textchannel (.getTextChannel message)
 
-        playlist-name last-match
-        playlist (db/list-playlist db playlist-name)]
+        playlist-name
+        (if (pos? (count args))
+          (first args)
+          (.getName (.getAuthor event)))
 
-    (doseq [t playlist]
-      (qm/load-playable-item-for-queue
-        ctx event
-        {:track-fn #(audio/play-track ctx event %)
-         :playlist-fn
-         #(do
-            (qm/update-queue ctx (rest (.getTracks %)))
-            (audio/play-track ctx event (first (.getTracks %))))}
-        (get t :track/url)))
-
-    (tu/send-message textchannel
-      (str "The playlist '" playlist-name "' has been added to the queue"))))
-
-(defn load-my-playlist
-  [{:keys [^DefaultAudioPlayerManager db] :as ctx}
-   ^GuildMessageReceivedEvent event menu]
-
-  (let [message (.getMessage event)
-        textchannel (.getTextChannel message)
-
-        playlist-name (.getName (.getAuthor event))
-        playlist (db/list-playlist db playlist-name)
+        playlist
+        (db/list-playlist db playlist-name)
 
         player-atom (get-in ctx [:player])
-        _ (swap! player-atom assoc :last-chat-event event)]
+        _ (swap! player-atom assoc :last-cmd-event event)]
+
 
     (doseq [t playlist]
       (qm/load-playable-item-for-queue

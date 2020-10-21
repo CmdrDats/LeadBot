@@ -22,6 +22,10 @@
 (defn audio-event [ctx event]
   (handle-audio-event {:event event :ctx ctx}))
 
+(defn write-file [filename b]
+  (with-open [w (clojure.java.io/output-stream filename)]
+    (.write w b)))
+
 (defn create-audioplayer [{:keys [^AudioPlayerManager playermanager] :as ctx} event]
   (let [local-audioplayer
         (doto (.createPlayer playermanager)
@@ -43,10 +47,13 @@
 
         (provide20MsAudio []
           (swap! lastframe (fn [f] (if f f (.provide local-audioplayer))))
-          (let [^AudioFrame frame @lastframe]
+          (let [^AudioFrame frame @lastframe
+                ba
+                (ByteBuffer/wrap
+                  (.getData frame))]
             (reset! lastframe nil)
-            (ByteBuffer/wrap
-              (.getData frame))))
+            (write-file "song.mp3" (.getData frame))
+            ba))
 
         (isOpus [] true)))
 
@@ -67,21 +74,33 @@
   (let [^AudioPlayer local-audioplayer (.player event)
         player-atom (get-in ctx [:player])
 
-        ^GuildMessageReceivedEvent last-nowplaying-event
+        ^GuildMessageReceivedEvent current-comms-event
         (:nowplaying-event @player-atom)
 
-        ^GuildMessageReceivedEvent last-chat-event
-        (:last-chat-event @player-atom)]
+        ^GuildMessageReceivedEvent new-comms-event
+        (:new-comms-event @player-atom)]
 
-    (if last-nowplaying-event
-      ;; TODO: I think we should only update if the message is faily recent
-      (tu/update-playing last-nowplaying-event
+    (cond
+      (and current-comms-event new-comms-event)
+      (do
+        (tu/delete-message (.getMessage current-comms-event))
+        (tu/set-current-chat-event player-atom new-comms-event)
+        (tu/send-playing (.getTextChannel (.getMessage new-comms-event))
+          (au/get-track-info
+            (au/get-playing-track local-audioplayer))))
+
+
+      (and current-comms-event (nil? new-comms-event))
+      (tu/update-playing current-comms-event
         (au/get-track-info
           (au/get-playing-track local-audioplayer)))
 
-      (tu/send-playing (.getTextChannel (.getMessage last-chat-event))
-        (au/get-track-info
-          (au/get-playing-track local-audioplayer))))))
+      (and new-comms-event (nil? current-comms-event))
+      (do
+        (tu/set-new-chat-event player-atom new-comms-event)
+        (tu/send-playing (.getTextChannel (.getMessage new-comms-event))
+          (au/get-track-info
+            (au/get-playing-track local-audioplayer)))))))
 
 (defn now-playing [{:keys [^JDA jda] :as ctx} event & [menu]]
   (condp = (class event)
@@ -95,7 +114,7 @@
           player-atom (get-in ctx [:player])]
 
       ;; Update this so we know where to send the next update
-      (swap! player-atom assoc :nowplaying-event event)
+      (tu/set-current-chat-event player-atom event)
 
       ;; TODO: Instead of sending a new message, if the old one isn't too many messages ago, update it
       (if (.getPlayingTrack local-audioplayer)
@@ -137,7 +156,9 @@
              false)]
 
        (if-not voicechannel
-         (tu/send-message textchannel "Please join a voice channel")
+         (do
+           (qm/update-queue ctx [track])
+           (tu/send-message textchannel "Please join a voice channel"))
          (do
            (au/join-voice-channel (.getGuild (.getMember event)) voicechannel)
            (.startTrack local-audioplayer track (not really-force-play?))))))))
@@ -164,7 +185,7 @@
 (defn play [ctx event & [{:keys [args] :as menu}]]
   (let [^AudioPlayer local-audioplayer (get-audioplayer ctx event)
         player-atom (get-in ctx [:player])
-        _ (swap! player-atom assoc :last-chat-event event)]
+        _ (swap! player-atom assoc :last-cmd-event event)]
 
     (cond
       (pos? (count args))
@@ -200,8 +221,8 @@
 (defn next-track-audio-event [ctx]
   (let [track (qm/pop-queue ctx)
         player-atom (get-in ctx [:player])
-        ^GuildMessageReceivedEvent last-chat-event (:last-chat-event @player-atom)]
-    (play-track ctx last-chat-event track true)))
+        ^GuildMessageReceivedEvent last-cmd-event (:last-cmd-event @player-atom)]
+    (play-track ctx last-cmd-event track true)))
 
 (defmethod handle-audio-event TrackEndEvent
   [{:keys [event ctx]}]

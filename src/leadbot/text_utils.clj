@@ -6,12 +6,10 @@
     (net.dv8tion.jda.api EmbedBuilder MessageBuilder)
     (net.dv8tion.jda.api.events.message.guild GuildMessageReceivedEvent)
     (javax.swing.text.rtf Constants)
-    (net.dv8tion.jda.api.entities MessageEmbed)))
+    (net.dv8tion.jda.api.entities MessageEmbed TextChannel)))
 
 ;; Bot Name
-(def myname "LeadBoat")
-
-(defn isitme? [botname]
+(defn isitme? [{:keys [myname]} botname]
   (= botname myname))
 
 (defn send-message [^TextChannelImpl textchannel message]
@@ -20,21 +18,35 @@
     (.sendMessage textchannel message))
   (println "Message Sent"))
 
+(defn delete-message [^ReceivedMessage message]
+  (println "Deleting Message: " (.getMessageId message) " - " message)
+  (.queue
+    (.deleteMessageById (.getTextChannel message) (.getMessageId message))))
+
 (defn build-now-playing [{:keys [title author seek duration]}]
-  (.build
-    (doto (EmbedBuilder.)
-      (.setTitle "Now Playing")
-      ;(.setDescription (str title " " author))
-      (.addField "Title:" title true)
-      (.addBlankField true)
-      (.addField "Artist:" author true)
-      (.addField
-        (str "Progress - " (quot (* seek 100) duration) "%")
-        (str (quot seek 1000) "s / " (quot duration 1000) "s")
-        false))))
+  (let [np
+        (doto (EmbedBuilder.)
+          (.setTitle "Now Playing")
+          ;(.setDescription (str title " " author))
+          (.addField "Title:" title true)
+          (.addBlankField true)
+          (.addField "Artist:" author true))
+
+        add-progress
+        (if (> 2000 seek)
+          (doto np
+            (.addField "Length" (str (quot duration 1000) "s") false))
+          (doto np
+            (.addField
+              (str "Progress - " (quot (* seek 100) duration) "%")
+              (str (quot seek 1000) "s / " (quot duration 1000) "s")
+              false)))]
+
+    (.build add-progress)))
 
 (defn send-playing [textchannel track]
   (let [embed (build-now-playing track)]
+    (println "MESSAGE: " textchannel "  " embed)
     (send-message textchannel embed)))
 
 (defn update-playing [^GuildMessageReceivedEvent last-nowplaying-event track]
@@ -96,3 +108,33 @@
            (.appendCodeBlock codeblocktext "json"))]
 
      (.build message))))
+
+
+
+;current now playing
+;new now playing = when a message is sent to current channel or it's a command on a new channel
+; if current and new, delete current, send new to new
+;; if nil current and new, send new
+;; if nil new and current, update current
+
+
+(defn set-new-chat-event [player-atom event]
+  (swap! player-atom assoc :new-comms-event event))
+
+(defn set-current-chat-event [player-atom event]
+  (swap! player-atom assoc
+    :nowplaying-event event
+    :new-comms-event nil))
+
+(defn update-chat-event
+  [ctx ^GuildMessageReceivedEvent new-nowplaying-event]
+
+  (let [player-atom (get-in ctx [:player])
+        ^GuildMessageReceivedEvent current-nowplaying-event
+        (:nowplaying-event @player-atom)
+
+        current-channel (when current-nowplaying-event (.getName (.getChannel current-nowplaying-event)))
+        new-channel (.getName (.getChannel new-nowplaying-event))]
+
+    (when (and current-channel (= current-channel new-channel))
+      (set-new-chat-event player-atom new-nowplaying-event))))

@@ -116,6 +116,8 @@
            Permission/NICKNAME_CHANGE]))
 
       (swap! context-state assoc
+        :cmd-prefix (get config :prefix)
+        :myname (get config :bot-name)
         :jda jda
         :threadpool (Executors/newScheduledThreadPool 4)
         :playermanager playermanager
